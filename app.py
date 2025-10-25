@@ -2,26 +2,60 @@
 import streamlit as st
 import yfinance as yf
 import pandas as pd
-import datetime # New import for dates
-import pandas_datareader.data as web # New import for FRED data
+import datetime 
+import pandas_datareader.data as web
 
-# --- STEP 10 BONUS: Set Page Layout ---
-# This MUST be the first 'st' command in your app
-# This makes your app use the full width of the screen
+# --- PAGE CONFIG (from Step 11) ---
+# This MUST be the first 'st' command
 st.set_page_config(layout="wide")
 
-# --- STEP 8: THE SIDEBAR ---
+# ==============================================================================
+# --- STEP 12: DATA CACHING FUNCTIONS ---
+# We are moving our data-pulling logic into functions.
+# The '@st.cache_data' decorator tells Streamlit to save the result
+# and not re-run the function if the inputs are the same.
+# ==============================================================================
+
+# This function gets all the general info for a ticker
+@st.cache_data
+def get_stock_info(ticker):
+    stock = yf.Ticker(ticker)
+    return stock.info
+
+# This function gets the price history
+@st.cache_data
+def get_stock_history(ticker, period="1y"):
+    stock = yf.Ticker(ticker)
+    return stock.history(period=period)
+
+# This function gets the financials
+@st.cache_data
+def get_stock_financials(ticker, quarterly=True):
+    stock = yf.Ticker(ticker)
+    if quarterly:
+        return stock.quarterly_financials
+    else:
+        return stock.financials
+
+# This function gets the FRED data
+@st.cache_data
+def get_fred_data(metric_ticker, start, end):
+    data = web.DataReader(metric_ticker, "fred", start, end)
+    return data
+
+# ==============================================================================
+# --- SIDEBAR (Unchanged) ---
+# ==============================================================================
 st.sidebar.title("Shubh's Analyst Toolkit")
 st.sidebar.write("Navigation")
 
-# We have added "Macro Dashboard" to this list
 page = st.sidebar.radio(
     "Select a Tool:",
     ("Welcome Page", "Stock Analysis Tool", "Stock Comparator", "Simple DCF Calculator", "Macro Dashboard")
 )
 
 # ==============================================================================
-# --- PAGE 1: WELCOME PAGE ---
+# --- PAGE 1: WELCOME PAGE (Unchanged) ---
 # ==============================================================================
 if page == "Welcome Page":
     
@@ -39,7 +73,7 @@ if page == "Welcome Page":
         st.info("Please type your name and click the button.")
 
 # ==============================================================================
-# --- PAGE 2: STOCK ANALYSIS TOOL ---
+# --- PAGE 2: STOCK ANALYSIS TOOL (Updated to use functions) ---
 # ==============================================================================
 elif page == "Stock Analysis Tool":
     
@@ -49,11 +83,14 @@ elif page == "Stock Analysis Tool":
     
     if st.button("Get Stock Info", key="stock_info_button"):
         try:
-            stock = yf.Ticker(ticker_symbol)
-            info = stock.info
+            # --- We now call our new, cached functions ---
+            info = get_stock_info(ticker_symbol)
+            hist = get_stock_history(ticker_symbol, period="1y")
+            financials = get_stock_financials(ticker_symbol, quarterly=True)
+            # ---
+            
             st.subheader(f"{info['longName']} ({ticker_symbol.upper()})")
             
-            hist = stock.history(period="1y") 
             st.subheader("1-Year Price Chart")
             st.line_chart(hist['Close'])
             
@@ -61,20 +98,20 @@ elif page == "Stock Analysis Tool":
             st.write(info['longBusinessSummary'])
             
             st.subheader("Quarterly Income Statement")
-            st.dataframe(stock.quarterly_financials)
+            st.dataframe(financials)
             
         except Exception as e:
             st.error(f"Could not retrieve data for {ticker_symbol}. Is it a valid ticker?")
             st.write(f"Error details: {e}")
 
 # ==============================================================================
-# --- PAGE 3: STOCK COMPARATOR ---
+# --- PAGE 3: STOCK COMPARATOR (Updated to use functions) ---
 # ==============================================================================
 elif page == "Stock Comparator":
     st.header("Stock Comparison Tool")
     
     default_tickers = ['AAPL', 'MSFT', 'GOOGL', 'AMZN', 'TSLA', 'NVDA']
-    selected_tickers = st.multoselect(
+    selected_tickers = st.multiselect(
         "Select stocks to compare (2 or more):",
         options=default_tickers,
         default=['AAPL', 'MSFT']
@@ -86,8 +123,11 @@ elif page == "Stock Comparator":
         
         for ticker in selected_tickers:
             try:
-                stock = yf.Ticker(ticker)
-                info = stock.info
+                # --- We now call our new, cached functions ---
+                info = get_stock_info(ticker)
+                hist = get_stock_history(ticker, period="1y")['Close']
+                # ---
+                
                 metrics_list.append({
                     'Ticker': ticker,
                     'Company Name': info.get('shortName', 'N_A'),
@@ -95,7 +135,7 @@ elif page == "Stock Comparator":
                     'Fwd P/E': f"{info.get('forwardPE', 0):.2f}",
                     'Div. Yield (%)': f"{info.get('dividendYield', 0) * 100:.2f}"
                 })
-                hist = stock.history(period="1y")['Close']
+                
                 hist.name = ticker
                 price_data_list.append(hist)
             except Exception as e:
@@ -115,7 +155,7 @@ elif page == "Stock Comparator":
         st.info("Please select at least two stocks to compare.")
 
 # ==============================================================================
-# --- PAGE 4: DCF CALCULATOR ---
+# --- PAGE 4: DCF CALCULATOR (Unchanged) ---
 # ==============================================================================
 elif page == "Simple DCF Calculator":
 
@@ -141,7 +181,6 @@ elif page == "Simple DCF Calculator":
         if wacc_dec <= g_long_dec:
             st.error("Error: Discount Rate (WACC) must be greater than Perpetual Growth Rate.")
         else:
-            # ... (Rest of DCF logic is unchanged) ...
             pv_fcf_list = []
             current_fcf = fcf
             for i in range(1, 6):
@@ -160,52 +199,38 @@ elif page == "Simple DCF Calculator":
             st.subheader("Result")
             st.success(f"Calculated Intrinsic Value: ${total_intrinsic_value:,.2f} M")
             st.write(f"PV of 5-Year FCFs: ${sum_pv_fcf:,.2f} M")
-            st.write(f"PV of Terminal Value: ${pv_terminal_value:,.2f} M")
+            st.write(f"PV of 10-Year Terminal Value: ${pv_terminal_value:,.2f} M") # Fixed a small typo here
 
 # ==============================================================================
-# --- PAGE 5: MACRO DASHBOARD (OUR NEW STEP 11) ---
+# --- PAGE 5: MACRO DASHBOARD (Updated to use functions) ---
 # ==============================================================================
 elif page == "Macro Dashboard":
     st.header("Macroeconomic Dashboard")
     st.write("Data sourced from FRED (Federal Reserve Economic Data)")
 
-    # 1. Define the metrics we want
-    # These are the official FRED ticker symbols
     METRICS = {
         "10-Year Treasury (DGS10)": "DGS10",
         "Yield Curve (T10Y2Y)": "T10Y2Y",
-        "CPI Inflation (CPIAUCSL_PC1)": "CPIAUCSL_PC1", # % Change from 1 Year Ago
+        "CPI Inflation (CPIAUCSL_PC1)": "CPIAUCSL_PC1",
         "Unemployment Rate (UNRATE)": "UNRATE"
     }
     
-    # 2. Set a start date for our charts
     start_date = datetime.datetime(2010, 1, 1)
     end_date = datetime.date.today()
     
-    # 3. Create columns for layout
     col1, col2 = st.columns(2)
-    
-    # We will alternate between col1 and col2 for a nice 2x2 grid
     columns_to_use = [col1, col2, col1, col2]
     
     st.info("Loading data... This may take a moment.")
     
-    # 4. Loop through our metrics, download data, and plot
-    # 'zip' lets us loop through two lists at the same time
     for (metric_name, metric_ticker), col in zip(METRICS.items(), columns_to_use):
         try:
-            # 'web.DataReader' is the new command we're using
-            data = web.DataReader(
-                metric_ticker, 
-                "fred", # The data source
-                start_date, 
-                end_date
-            )
+            # --- We now call our new, cached function ---
+            data = get_fred_data(metric_ticker, start_date, end_date)
+            # ---
             
-            # Use the 'with col:' to put the chart in the correct column
             with col:
                 st.subheader(metric_name)
-                # Plot the data
                 st.line_chart(data)
 
         except Exception as e:

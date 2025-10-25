@@ -2,14 +2,22 @@
 import streamlit as st
 import yfinance as yf
 import pandas as pd
+import datetime # New import for dates
+import pandas_datareader.data as web # New import for FRED data
 
-# --- THIS IS STEP 8: THE SIDEBAR ---
+# --- STEP 10 BONUS: Set Page Layout ---
+# This MUST be the first 'st' command in your app
+# This makes your app use the full width of the screen
+st.set_page_config(layout="wide")
+
+# --- STEP 8: THE SIDEBAR ---
 st.sidebar.title("Shubh's Analyst Toolkit")
 st.sidebar.write("Navigation")
 
+# We have added "Macro Dashboard" to this list
 page = st.sidebar.radio(
     "Select a Tool:",
-    ("Welcome Page", "Stock Analysis Tool", "Stock Comparator", "Simple DCF Calculator")
+    ("Welcome Page", "Stock Analysis Tool", "Stock Comparator", "Simple DCF Calculator", "Macro Dashboard")
 )
 
 # ==============================================================================
@@ -25,7 +33,6 @@ if page == "Welcome Page":
     st.header("My First Interactive Tool")
     user_name = st.text_input("What is your name?")
     
-    # --- FIX 1: Added a unique 'key' to this button ---
     if st.button("Click Me", key="welcome_button"):
         st.success(f"Hello, {user_name}! Welcome to your dashboard.")
     else:
@@ -40,7 +47,6 @@ elif page == "Stock Analysis Tool":
     
     ticker_symbol = st.text_input("Enter Stock Ticker", "AAPL") 
     
-    # --- FIX 2: Added a unique 'key' to this button ---
     if st.button("Get Stock Info", key="stock_info_button"):
         try:
             stock = yf.Ticker(ticker_symbol)
@@ -62,20 +68,19 @@ elif page == "Stock Analysis Tool":
             st.write(f"Error details: {e}")
 
 # ==============================================================================
-# --- PAGE 3: STOCK COMPARATOR (OUR NEW STEP 9) ---
+# --- PAGE 3: STOCK COMPARATOR ---
 # ==============================================================================
 elif page == "Stock Comparator":
     st.header("Stock Comparison Tool")
     
     default_tickers = ['AAPL', 'MSFT', 'GOOGL', 'AMZN', 'TSLA', 'NVDA']
-    selected_tickers = st.multiselect(
+    selected_tickers = st.multoselect(
         "Select stocks to compare (2 or more):",
         options=default_tickers,
         default=['AAPL', 'MSFT']
     )
     
     if len(selected_tickers) > 1:
-        
         metrics_list = []
         price_data_list = []
         
@@ -83,7 +88,6 @@ elif page == "Stock Comparator":
             try:
                 stock = yf.Ticker(ticker)
                 info = stock.info
-                
                 metrics_list.append({
                     'Ticker': ticker,
                     'Company Name': info.get('shortName', 'N_A'),
@@ -91,11 +95,9 @@ elif page == "Stock Comparator":
                     'Fwd P/E': f"{info.get('forwardPE', 0):.2f}",
                     'Div. Yield (%)': f"{info.get('dividendYield', 0) * 100:.2f}"
                 })
-                
                 hist = stock.history(period="1y")['Close']
                 hist.name = ticker
                 price_data_list.append(hist)
-                
             except Exception as e:
                 st.warning(f"Could not retrieve data for {ticker}. Skipping. Error: {e}")
         
@@ -109,10 +111,8 @@ elif page == "Stock Comparator":
             price_df = pd.concat(price_data_list, axis=1)
             normalized_df = price_df / price_df.iloc[0]
             st.line_chart(normalized_df)
-        
     else:
         st.info("Please select at least two stocks to compare.")
-
 
 # ==============================================================================
 # --- PAGE 4: DCF CALCULATOR ---
@@ -133,7 +133,6 @@ elif page == "Simple DCF Calculator":
         wacc = st.number_input("Discount Rate (WACC) (%)", value=8.0, step=0.25, key="dcf_wacc")
         g_long = st.number_input("Perpetual Growth Rate (%)", value=2.5, step=0.1, key="dcf_g_long")
 
-    # --- FIX 3: Added a unique 'key' to this button ---
     if st.button("Calculate DCF Value", key="dcf_calc_button"):
         g_short_dec = g_short / 100
         wacc_dec = wacc / 100
@@ -142,6 +141,7 @@ elif page == "Simple DCF Calculator":
         if wacc_dec <= g_long_dec:
             st.error("Error: Discount Rate (WACC) must be greater than Perpetual Growth Rate.")
         else:
+            # ... (Rest of DCF logic is unchanged) ...
             pv_fcf_list = []
             current_fcf = fcf
             for i in range(1, 6):
@@ -161,3 +161,52 @@ elif page == "Simple DCF Calculator":
             st.success(f"Calculated Intrinsic Value: ${total_intrinsic_value:,.2f} M")
             st.write(f"PV of 5-Year FCFs: ${sum_pv_fcf:,.2f} M")
             st.write(f"PV of Terminal Value: ${pv_terminal_value:,.2f} M")
+
+# ==============================================================================
+# --- PAGE 5: MACRO DASHBOARD (OUR NEW STEP 11) ---
+# ==============================================================================
+elif page == "Macro Dashboard":
+    st.header("Macroeconomic Dashboard")
+    st.write("Data sourced from FRED (Federal Reserve Economic Data)")
+
+    # 1. Define the metrics we want
+    # These are the official FRED ticker symbols
+    METRICS = {
+        "10-Year Treasury (DGS10)": "DGS10",
+        "Yield Curve (T10Y2Y)": "T10Y2Y",
+        "CPI Inflation (CPIAUCSL_PC1)": "CPIAUCSL_PC1", # % Change from 1 Year Ago
+        "Unemployment Rate (UNRATE)": "UNRATE"
+    }
+    
+    # 2. Set a start date for our charts
+    start_date = datetime.datetime(2010, 1, 1)
+    end_date = datetime.date.today()
+    
+    # 3. Create columns for layout
+    col1, col2 = st.columns(2)
+    
+    # We will alternate between col1 and col2 for a nice 2x2 grid
+    columns_to_use = [col1, col2, col1, col2]
+    
+    st.info("Loading data... This may take a moment.")
+    
+    # 4. Loop through our metrics, download data, and plot
+    # 'zip' lets us loop through two lists at the same time
+    for (metric_name, metric_ticker), col in zip(METRICS.items(), columns_to_use):
+        try:
+            # 'web.DataReader' is the new command we're using
+            data = web.DataReader(
+                metric_ticker, 
+                "fred", # The data source
+                start_date, 
+                end_date
+            )
+            
+            # Use the 'with col:' to put the chart in the correct column
+            with col:
+                st.subheader(metric_name)
+                # Plot the data
+                st.line_chart(data)
+
+        except Exception as e:
+            st.error(f"Could not load data for {metric_name}. Error: {e}")
